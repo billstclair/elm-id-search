@@ -147,7 +147,7 @@ dictCount =
 
 makeTable : Table
 makeTable =
-    IdSearch.makeTable dictCount List.singleton
+    IdSearch.makeTable dictCount (String.toLower >> List.singleton)
 
 
 emptyTables : Tables
@@ -250,7 +250,7 @@ update msg model =
             receiveNames boygirl result model
 
         ChooseTable completeWhich ->
-            { model | completeWhich = completeWhich } |> withNoCmd
+            textChanged model.text { model | completeWhich = completeWhich }
 
         OnSelection selection ->
             onSelection selection model
@@ -357,6 +357,11 @@ sortNames prefix names =
         |> List.map Tuple.second
 
 
+doCompletion : Model -> Cmd Msg
+doCompletion model =
+    Task.perform TextChanged <| Task.succeed model.text
+
+
 receiveNames : BoyGirl -> Result Http.Error (List String) -> Model -> ( Model, Cmd Msg )
 receiveNames boygirl result model =
     case result of
@@ -368,15 +373,12 @@ receiveNames boygirl result model =
                 tables =
                     model.tables
 
-                lclist =
-                    List.map String.toLower namelist
-
                 newTable =
-                    IdSearch.insertList lclist <|
+                    IdSearch.insertList namelist <|
                         getTable which tables
 
                 newBoth =
-                    IdSearch.insertList lclist <|
+                    IdSearch.insertList namelist <|
                         getTable BothTable tables
             in
             { model
@@ -388,8 +390,7 @@ receiveNames boygirl result model =
             }
                 |> withCmds
                     [ if model.receivedOne then
-                        -- process initial @Angel
-                        Task.perform TextChanged <| Task.succeed model.text
+                        doCompletion model
 
                       else
                         Cmd.none
