@@ -400,10 +400,20 @@ receiveNames boygirl result model =
             let
                 err =
                     Debug.log
-                        ("Error reading " ++ Debug.toString boygirl ++ " names: ")
+                        ("Error reading " ++ boygirlToString boygirl ++ " names: ")
                         error
             in
             { model | error = Just err } |> withNoCmd
+
+
+boygirlToString : BoyGirl -> String
+boygirlToString boygirl =
+    case boygirl of
+        Boy ->
+            "boy"
+
+        Girl ->
+            "girl"
 
 
 pageTitle : String
@@ -497,7 +507,7 @@ mainPage model =
                     text <|
                         ("Completing \"" ++ complete ++ "\": ")
                             ++ (String.replace "," ", " <|
-                                    Debug.toString model.completions
+                                    stringListToString model.completions
                                )
             ]
         , row []
@@ -518,6 +528,12 @@ mainPage model =
                 }
             ]
         ]
+
+
+stringListToString : List String -> String
+stringListToString list =
+    List.foldl (\s res -> res ++ ", " ++ s) "" list
+        |> String.dropLeft 2
 
 
 blue : Color
