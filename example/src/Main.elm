@@ -18,6 +18,7 @@ module Main exposing (main)
 import Browser exposing (Document, UrlRequest(..))
 import Browser.Navigation as Navigation exposing (Key)
 import Cmd.Extra exposing (withCmd, withCmds, withNoCmd)
+import CustomElement.TextAreaTracker as Tracker
 import Element
     exposing
         ( Attribute
@@ -53,6 +54,8 @@ import Html.Events exposing (onClick)
 import Http
 import IdSearch
 import Json.Decode as JD exposing (Decoder)
+import String.Extra as SE
+import Task
 import Url exposing (Url)
 
 
@@ -183,21 +186,29 @@ setTable which table tables =
 
 type alias Model =
     { text : String
+    , selection : Maybe Tracker.Selection
     , complete : String
+    , completions : List String
     , completeWhich : WhichTable
+    , triggerSelection : Int
     , names : Names
     , tables : Tables
+    , receivedOne : Bool
     , error : Maybe Http.Error
     }
 
 
 init : () -> Url -> Key -> ( Model, Cmd Msg )
 init _ url key =
-    { text = "Hello, World!"
+    { text = "I love my @Angel"
+    , selection = Nothing
     , complete = ""
+    , completions = []
     , completeWhich = BothTable
+    , triggerSelection = 0
     , names = emptyNames
     , tables = emptyTables
+    , receivedOne = False
     , error = Nothing
     }
         |> withCmds
@@ -212,6 +223,7 @@ type Msg
     | HandleUrlChange Url
     | ReceiveNames BoyGirl (Result Http.Error (List String))
     | ChooseTable WhichTable
+    | OnSelection Tracker.Selection
     | TextChanged String
 
 
@@ -235,42 +247,13 @@ update msg model =
             model |> withNoCmd
 
         ReceiveNames boygirl result ->
-            case result of
-                Ok namelist ->
-                    let
-                        which =
-                            whichTable boygirl
-
-                        tables =
-                            model.tables
-
-                        newTable =
-                            IdSearch.insertList namelist <|
-                                getTable which tables
-
-                        newBoth =
-                            IdSearch.insertList namelist <|
-                                getTable BothTable tables
-                    in
-                    { model
-                        | names = setNames boygirl namelist model.names
-                        , tables =
-                            setTable which newTable tables
-                                |> setTable BothTable newBoth
-                    }
-                        |> withNoCmd
-
-                Err error ->
-                    let
-                        err =
-                            Debug.log
-                                ("Error reading " ++ Debug.toString boygirl ++ " names: ")
-                                error
-                    in
-                    { model | error = Just err } |> withNoCmd
+            receiveNames boygirl result model
 
         ChooseTable completeWhich ->
             { model | completeWhich = completeWhich } |> withNoCmd
+
+        OnSelection selection ->
+            onSelection selection model
 
         TextChanged text ->
             textChanged text model
@@ -278,7 +261,148 @@ update msg model =
 
 textChanged : String -> Model -> ( Model, Cmd Msg )
 textChanged text model =
-    { model | text = text } |> withNoCmd
+    { model
+        | text = text
+        , triggerSelection =
+            if String.contains "@" text then
+                model.triggerSelection + 1
+
+            else
+                model.triggerSelection
+    }
+        |> withNoCmd
+
+
+onSelection : Tracker.Selection -> Model -> ( Model, Cmd Msg )
+onSelection selection mdl =
+    let
+        cursor =
+            selection.selectionEnd
+
+        model =
+            { mdl
+                | selection = Nothing
+                , complete = ""
+                , completions = []
+            }
+    in
+    if cursor /= selection.selectionStart then
+        model |> withNoCmd
+
+    else
+        case findAtName cursor model.text of
+            Nothing ->
+                model |> withNoCmd
+
+            Just complete ->
+                let
+                    table =
+                        getTable model.completeWhich model.tables
+
+                    completions =
+                        IdSearch.lookup complete table
+                            |> sortNames complete
+                in
+                { model
+                    | selection = Just selection
+                    , complete = complete
+                    , completions = completions
+                }
+                    |> withNoCmd
+
+
+findAtName : Int -> String -> Maybe String
+findAtName cursor string =
+    let
+        beginning =
+            String.left cursor string
+                |> String.toLower
+                |> String.replace "\n" " "
+    in
+    if
+        String.startsWith "@" beginning
+            && not (String.contains " " beginning)
+    then
+        Just <| String.dropLeft 1 beginning
+
+    else
+        let
+            res =
+                SE.rightOfBack " @" beginning
+        in
+        if res /= "" && not (String.contains " " res) then
+            Just res
+
+        else
+            Nothing
+
+
+sortNames : String -> List String -> List String
+sortNames prefix names =
+    let
+        tuples =
+            List.map
+                (\name ->
+                    ( if String.startsWith prefix name then
+                        0
+
+                      else
+                        1
+                    , name
+                    )
+                )
+                names
+    in
+    List.sort tuples
+        |> List.map Tuple.second
+
+
+receiveNames : BoyGirl -> Result Http.Error (List String) -> Model -> ( Model, Cmd Msg )
+receiveNames boygirl result model =
+    case result of
+        Ok namelist ->
+            let
+                which =
+                    whichTable boygirl
+
+                tables =
+                    model.tables
+
+                lclist =
+                    List.map String.toLower namelist
+
+                newTable =
+                    IdSearch.insertList lclist <|
+                        getTable which tables
+
+                newBoth =
+                    IdSearch.insertList lclist <|
+                        getTable BothTable tables
+            in
+            { model
+                | names = setNames boygirl namelist model.names
+                , receivedOne = True
+                , tables =
+                    setTable which newTable tables
+                        |> setTable BothTable newBoth
+            }
+                |> withCmds
+                    [ if model.receivedOne then
+                        -- process initial @Angel
+                        Task.perform TextChanged <| Task.succeed model.text
+
+                      else
+                        Cmd.none
+                    ]
+
+        Err error ->
+            let
+                err =
+                    Debug.log
+                        ("Error reading " ++ Debug.toString boygirl ++ " names: ")
+                        error
+            in
+            { model | error = Just err } |> withNoCmd
 
 
 pageTitle : String
@@ -292,6 +416,12 @@ view model =
     , body =
         [ Element.layout [] <|
             mainPage model
+        , Tracker.textAreaTracker
+            [ Tracker.textAreaId textAreaId
+            , Tracker.triggerSelection model.triggerSelection
+            , Tracker.onSelection OnSelection
+            ]
+            []
         ]
     }
 
@@ -332,8 +462,7 @@ mainPage model =
             []
             [ text <|
                 "Type some text below."
-                    ++ " Names beginning with \"@\" will"
-                    ++ " pop up an auto-complete dialog."
+                    ++ " Names beginning with \"@\" will show completions."
             ]
         , row []
             [ Input.radioRow [ spacing pad ]
@@ -358,13 +487,17 @@ mainPage model =
             , label = Input.labelHidden "Text"
             , spellcheck = True
             }
-        , row []
+        , paragraph []
             [ case model.complete of
                 "" ->
                     text "Not completing."
 
                 complete ->
-                    text <| "Completing \"" ++ complete ++ "\"."
+                    text <|
+                        ("Completing \"" ++ complete ++ "\": ")
+                            ++ (String.replace "," ", " <|
+                                    Debug.toString model.completions
+                               )
             ]
         , row []
             [ text <|
