@@ -2,6 +2,8 @@ The [billstclair/elm-id-search](http://package.elm-lang.org/packages/billstclair
 
 You can use it to index identifying strings for any record type. For example, you could index `User` records by their userid to offer completions while typing "@foo" for a Twitter interface.
 
+There's a live example, showing completion of lists of popular boy and girl baby names at https://billstclair.github.io/elm-id-search
+
 An `elm repl` example:
 
 ```
